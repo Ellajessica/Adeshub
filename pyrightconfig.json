@@ -1,0 +1,8 @@
+{
+  "venvPath": "C:/Users/hp",
+  "venv": "venv",
+  "extraPaths": [
+    "./backend"
+  ],
+  "reportIncompatibleVariableOverride": false
+}
