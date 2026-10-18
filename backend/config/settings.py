@@ -61,6 +61,13 @@ INSTALLED_APPS = [
     'apps.orders.apps.OrdersConfig',
 ]
 
+try:
+    import storages  # noqa: F401
+    INSTALLED_APPS.insert(INSTALLED_APPS.index('corsheaders') + 1, 'storages')
+except ImportError:
+    pass
+
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -254,9 +261,64 @@ STATICFILES_DIRS = [
     BASE_DIR / 'static',
 ] if (BASE_DIR / 'static').exists() else []
 
+# Media & Cloudflare R2 Object Storage Configuration
+AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID', '').strip()
+AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '').strip()
+AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME', '').strip()
+AWS_S3_ENDPOINT_URL = os.getenv('AWS_S3_ENDPOINT_URL', '').strip()
+
+_raw_custom_domain = os.getenv('AWS_S3_CUSTOM_DOMAIN', '').strip()
+AWS_S3_CUSTOM_DOMAIN = (
+    _raw_custom_domain.replace('https://', '').replace('http://', '').rstrip('/')
+    if _raw_custom_domain else None
+)
+
+AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'auto').strip()
+AWS_S3_SIGNATURE_VERSION = 's3v4'
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = os.getenv('AWS_QUERYSTRING_AUTH', 'False').lower() in ('true', '1')
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': os.getenv('AWS_S3_CACHE_CONTROL', 'max-age=86400'),
+}
+
+USE_R2_STORAGE = bool(
+    AWS_ACCESS_KEY_ID and
+    AWS_SECRET_ACCESS_KEY and
+    AWS_STORAGE_BUCKET_NAME and
+    AWS_S3_ENDPOINT_URL
+)
+
 # Media files (User uploads, Product images)
-MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+if USE_R2_STORAGE and AWS_S3_CUSTOM_DOMAIN:
+    MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/"
+elif USE_R2_STORAGE and AWS_S3_ENDPOINT_URL:
+    MEDIA_URL = f"{AWS_S3_ENDPOINT_URL.rstrip('/')}/{AWS_STORAGE_BUCKET_NAME}/"
+else:
+    MEDIA_URL = 'media/'
+
+# Django 4.2+ STORAGES Configuration
+STORAGES = {
+    "default": {
+        "BACKEND": (
+            "config.storage_backends.CloudflareR2MediaStorage"
+            if USE_R2_STORAGE
+            else "django.core.files.storage.FileSystemStorage"
+        ),
+    },
+    "staticfiles": {
+        "BACKEND": (
+            "whitenoise.storage.CompressedManifestStaticFilesStorage"
+            if (not DEBUG and not IS_TESTING)
+            else "django.contrib.staticfiles.storage.StaticFilesStorage"
+        ),
+    },
+}
+
+if USE_R2_STORAGE:
+    DEFAULT_FILE_STORAGE = "config.storage_backends.CloudflareR2MediaStorage"
+
 
 
 # Default primary key field type

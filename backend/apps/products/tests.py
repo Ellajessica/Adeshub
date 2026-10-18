@@ -144,8 +144,9 @@ class ProductAPITests(APITestCase):
         url = reverse('products:category-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(response.data['results']), 1)
-        self.assertEqual(response.data['results'][0]['name'], 'Snacks')
+        results = response.data if isinstance(response.data, list) else response.data.get('results', [])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['name'], 'Snacks')
 
     def test_public_product_list_and_filters_api(self):
         """Test public GET /api/products/ with search and category filters."""
@@ -222,3 +223,54 @@ class ProductAPITests(APITestCase):
         self.assertEqual(response.data['variants'][0]['name'], '5kg Bag')
         self.assertEqual(response.data['variants'][0]['price'], '13.99')
         self.assertEqual(response.data['variants'][0]['stock_quantity'], 15)
+
+
+class CloudflareR2StorageTests(TestCase):
+    """
+    Automated unit tests for Cloudflare R2 custom storage backend and URL generation.
+    """
+
+    def test_custom_domain_sanitization(self):
+        """Test custom domain strips protocol and trailing slashes."""
+        from config.storage_backends import CloudflareR2MediaStorage
+        storage = CloudflareR2MediaStorage()
+        with self.settings(AWS_S3_CUSTOM_DOMAIN='https://pub-abc123xyz.r2.dev/'):
+            self.assertEqual(storage.custom_domain, 'pub-abc123xyz.r2.dev')
+
+        with self.settings(AWS_S3_CUSTOM_DOMAIN='http://media.adeshubafricanstore.com'):
+            self.assertEqual(storage.custom_domain, 'media.adeshubafricanstore.com')
+
+    def test_r2_storage_attributes(self):
+        """Test R2 required attributes (no ACL, s3v4, no overwrite)."""
+        from config.storage_backends import CloudflareR2MediaStorage
+        self.assertIsNone(CloudflareR2MediaStorage.default_acl)
+        self.assertFalse(CloudflareR2MediaStorage.file_overwrite)
+        self.assertEqual(CloudflareR2MediaStorage.signature_version, 's3v4')
+
+    def test_querystring_auth_defaults_with_custom_domain(self):
+        """Test querystring auth defaults to False when custom domain is set."""
+        from config.storage_backends import CloudflareR2MediaStorage
+        storage = CloudflareR2MediaStorage()
+        with self.settings(AWS_S3_CUSTOM_DOMAIN='pub-abc123xyz.r2.dev'):
+            self.assertFalse(storage.querystring_auth)
+
+    def test_image_url_generation_in_serializer(self):
+        """Test ProductListSerializer returns valid image URL."""
+        from apps.products.serializers import ProductListSerializer
+        category = Category.objects.create(name='Flour', slug='flour')
+        product = Product.objects.create(
+            name='Yam Flour',
+            category=category,
+            sku='YAM-FLOUR-TEST',
+            price=Decimal('10.00'),
+            stock_quantity=5
+        )
+        ProductImage.objects.create(
+            product=product,
+            image='products/test_yam.png',
+            is_primary=True
+        )
+        serializer = ProductListSerializer(product)
+        primary_url = serializer.data['primary_image']
+        self.assertIsNotNone(primary_url)
+        self.assertTrue('products/test_yam.png' in primary_url)
