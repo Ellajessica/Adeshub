@@ -316,9 +316,6 @@ STORAGES = {
     },
 }
 
-if USE_R2_STORAGE:
-    DEFAULT_FILE_STORAGE = "config.storage_backends.CloudflareR2MediaStorage"
-
 
 
 # Default primary key field type

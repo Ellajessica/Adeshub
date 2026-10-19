@@ -112,6 +112,9 @@ class Command(BaseCommand):
                 continue
 
             # Upload to Cloudflare R2
+            if r2_storage is None:
+                continue
+
             try:
                 # Check if file already exists in R2
                 if not overwrite and r2_storage.exists(rel_path):
