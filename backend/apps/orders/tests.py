@@ -1008,7 +1008,7 @@ class TransactionalEmailAndGuestOrderSecurityTestCase(APITestCase):
 
         with override_settings(
             RESEND_API_KEY="re_mock_order_key",
-            EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
             EMAIL_REPLY_TO="Info@adeshub.co.uk",
         ):
             res = send_order_confirmation_email(self.registered_order)
@@ -1020,7 +1020,7 @@ class TransactionalEmailAndGuestOrderSecurityTestCase(APITestCase):
 
         mock_resend_send.assert_called_once()
         call_params = mock_resend_send.call_args[0][0]
-        self.assertEqual(call_params["from"], "AdesHub <orders@send.adeshubafricanstore.com>")
+        self.assertEqual(call_params["from"], "AdesHub <noreply@adeshubafricanstore.com>")
         self.assertEqual(call_params["to"], "buyer@example.com")
         self.assertIn(self.registered_order.order_reference, call_params["subject"])
         self.assertEqual(call_params["reply_to"], "Info@adeshub.co.uk")
@@ -1065,7 +1065,7 @@ class TransactionalEmailAndGuestOrderSecurityTestCase(APITestCase):
             STRIPE_WEBHOOK_SECRET="whsec_test_secret",
             STRIPE_CURRENCY="gbp",
             RESEND_API_KEY="re_mock_order_key",
-            EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
         ):
             with patch("apps.orders.stripe_service.stripe.Webhook.construct_event", return_value=payload):
                 # 1. First webhook event arrival
@@ -1109,7 +1109,7 @@ class TransactionalEmailAndGuestOrderSecurityTestCase(APITestCase):
 
         with override_settings(
             RESEND_API_KEY="re_mock_order_key",
-            EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
         ):
             result = send_order_confirmation_email(self.registered_order, max_retries=0)
 

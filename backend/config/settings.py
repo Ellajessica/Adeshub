@@ -322,6 +322,62 @@ STORAGES = {
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
+# ==============================================================================
+# Logging Configuration
+# ==============================================================================
+# In production on Render/container environments, all loggers must output to
+# stdout/stderr so that log aggregators capture application activity, errors,
+# auth events, and email dispatch status. Django's default logging disables
+# the console handler when DEBUG=False; this explicit configuration ensures
+# that logs are always visible in production.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[%(asctime)s] %(levelname)s [%(name)s:%(lineno)d] %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+        'simple': {
+            'format': '%(levelname)s %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'stream': 'ext://sys.stdout',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'apps': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'resend': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+
 # Stripe Payment Configuration
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
 STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')
@@ -339,10 +395,14 @@ if IS_TESTING:
     RESEND_API_KEY = ''
 else:
     RESEND_API_KEY = os.getenv('RESEND_API_KEY', '').strip()
-EMAIL_FROM = os.getenv('EMAIL_FROM', '').strip() or os.getenv('DEFAULT_FROM_EMAIL', '').strip() or 'AdesHub <orders@send.adeshubafricanstore.com>'
+
+# Resend verified domain is adeshubafricanstore.com (apex domain).
+# Intended transactional sender: AdesHub <noreply@adeshubafricanstore.com>
+_raw_email_from = (os.getenv('EMAIL_FROM') or os.getenv('DEFAULT_FROM_EMAIL') or '').strip().strip('\'"')
+EMAIL_FROM = _raw_email_from or 'AdesHub <noreply@adeshubafricanstore.com>'
 DEFAULT_FROM_EMAIL = EMAIL_FROM
-EMAIL_REPLY_TO = os.getenv('EMAIL_REPLY_TO', 'Info@adeshub.co.uk').strip()
-SUPPORT_EMAIL = os.getenv('SUPPORT_EMAIL', 'Info@adeshub.co.uk').strip()
+EMAIL_REPLY_TO = (os.getenv('EMAIL_REPLY_TO') or 'Info@adeshub.co.uk').strip().strip('\'"')
+SUPPORT_EMAIL = (os.getenv('SUPPORT_EMAIL') or 'Info@adeshub.co.uk').strip().strip('\'"')
 SUPPORT_PHONE = os.getenv('SUPPORT_PHONE', '+44 (0) 20 1234 5678').strip()
 
 # Development / Testing Django Email Backend Fallback (used when RESEND_API_KEY is not set)

@@ -564,7 +564,7 @@ class PasswordResetAPITests(APITestCase):
 
         with override_settings(
             RESEND_API_KEY="re_mock_reset_key",
-            EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
             EMAIL_REPLY_TO="Info@adeshub.co.uk",
             FRONTEND_URL="https://adeshubafricanstore.com",
         ):
@@ -580,12 +580,72 @@ class PasswordResetAPITests(APITestCase):
         # Verify Resend SDK was called
         mock_resend_send.assert_called_once()
         call_params = mock_resend_send.call_args[0][0]
-        self.assertEqual(call_params["from"], "AdesHub <orders@send.adeshubafricanstore.com>")
+        self.assertEqual(call_params["from"], "AdesHub <noreply@adeshubafricanstore.com>")
         self.assertEqual(call_params["to"], "customer.reset@adeshub.com")
         self.assertEqual(call_params["subject"], "Reset Your AdesHub Password")
         self.assertEqual(call_params["reply_to"], "Info@adeshub.co.uk")
         self.assertIn("https://adeshubafricanstore.com/reset-password?uid=", call_params["text"])
         self.assertIn("https://adeshubafricanstore.com/reset-password?uid=", call_params["html"])
+
+    @patch("resend.Emails.send")
+    def test_password_reset_request_default_sender_fallback_uses_noreply(self, mock_resend_send):
+        """Test that password reset defaults to AdesHub <noreply@adeshubafricanstore.com> when EMAIL_FROM is unset."""
+        from django.test import override_settings
+
+        mock_resend_send.return_value = {"id": "msg_pwd_reset_fallback_456"}
+
+        with override_settings(
+            RESEND_API_KEY="re_mock_reset_key",
+            EMAIL_FROM="",
+            DEFAULT_FROM_EMAIL="",
+            EMAIL_REPLY_TO="Info@adeshub.co.uk",
+            FRONTEND_URL="https://adeshubafricanstore.com",
+        ):
+            response = self.client.post(
+                self.reset_request_url,
+                {'email': 'customer.reset@adeshub.com'},
+                format='json'
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_resend_send.assert_called_once()
+        call_params = mock_resend_send.call_args[0][0]
+        self.assertEqual(call_params["from"], "AdesHub <noreply@adeshubafricanstore.com>")
+
+    @patch("resend.Emails.send")
+    def test_password_reset_request_nonexistent_user_does_not_call_resend(self, mock_resend_send):
+        """Test that requesting reset for unknown email returns generic 200 without invoking Resend."""
+        from django.test import override_settings
+
+        with override_settings(
+            RESEND_API_KEY="re_mock_reset_key",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
+        ):
+            response = self.client.post(
+                self.reset_request_url,
+                {'email': 'unknown.user.999@adeshub.com'},
+                format='json'
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('message', response.data)
+        # Resend must NOT be called for non-existent account
+        mock_resend_send.assert_not_called()
+
+    def test_password_reset_request_logging_emitted(self):
+        """Test that password reset request and lookup results are logged safely without leaking tokens."""
+        with self.assertLogs('apps.accounts', level='INFO') as log_context:
+            self.client.post(
+                self.reset_request_url,
+                {'email': 'customer.reset@adeshub.com'},
+                format='json'
+            )
+            # Verify request received and account lookup logs
+            logs_str = " ".join(log_context.output)
+            self.assertIn("[PasswordReset] Request received for email", logs_str)
+            self.assertIn("[PasswordReset] Account lookup succeeded", logs_str)
+            # Ensure sensitive user details or tokens are not leaked in log output
+            self.assertNotIn(self.token, logs_str)
 
     @patch("resend.Emails.send")
     def test_password_reset_request_resend_failure_does_not_crash(self, mock_resend_send):
@@ -596,7 +656,7 @@ class PasswordResetAPITests(APITestCase):
 
         with override_settings(
             RESEND_API_KEY="re_mock_reset_key",
-            EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
         ):
             response = self.client.post(
                 self.reset_request_url,

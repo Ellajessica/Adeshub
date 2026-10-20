@@ -140,13 +140,14 @@ def send_password_reset_email(user: User, reset_url: str, max_retries: int = 1) 
     Tokens are never logged.
     """
     if not user.email:
-        logger.warning("User pk=%s has no email address. Skipping password reset email.", user.pk)
+        logger.warning("[PasswordReset] User pk=%s has no email address. Skipping password reset email.", user.pk)
         return False
 
+    masked = mask_email(user.email)
     subject, text_content, html_content = build_password_reset_email_content(user, reset_url)
     reply_to = getattr(settings, 'EMAIL_REPLY_TO', 'Info@adeshub.co.uk')
 
-    logger.info("Dispatching password reset email for user %s (%s)", user.pk, mask_email(user.email))
+    logger.info("[PasswordReset] Dispatching transactional reset email for user pk=%s (%s)", user.pk, masked)
 
     result = send_transactional_email(
         to_email=user.email,
@@ -158,12 +159,20 @@ def send_password_reset_email(user: User, reset_url: str, max_retries: int = 1) 
     )
 
     if result.get('success'):
-        logger.info("Password reset email successfully sent to %s via %s", mask_email(user.email), result.get('provider'))
+        logger.info(
+            "[PasswordReset] Password reset email successfully sent to %s via %s (message_id=%s)",
+            masked,
+            result.get('provider'),
+            result.get('message_id')
+        )
         return True
     else:
         logger.error(
-            "Failed sending password reset email for user %s: %s",
+            "[PasswordReset] Failed sending password reset email for user %s (%s): provider=%s status=%s error=%s",
             user.pk,
+            masked,
+            result.get('provider'),
+            result.get('status'),
             result.get('error', 'Unknown error')
         )
         return False
@@ -184,14 +193,27 @@ def send_password_reset_email_async(user_id: int, reset_url: str):
     def _run():
         from django.db import connections
         connections.close_all()
+        logger.info("[PasswordReset] Background email thread started execution for user_id=%s", user_id)
         try:
             user = User.objects.filter(pk=user_id).first()
             if user:
-                send_password_reset_email(user, reset_url)
+                logger.info("[PasswordReset] Background thread retrieved user_id=%s from DB. Delivering reset email.", user_id)
+                success = send_password_reset_email(user, reset_url)
+                if success:
+                    logger.info("[PasswordReset] Background email thread successfully finished for user_id=%s", user_id)
+                else:
+                    logger.error("[PasswordReset] Background email thread failed to deliver reset email for user_id=%s", user_id)
+            else:
+                logger.error("[PasswordReset] Background thread could not find active user for user_id=%s in DB.", user_id)
         except Exception as err:
-            logger.error("Async password reset email execution failed for user id %s: %s", user_id, str(err))
+            logger.exception(
+                "[PasswordReset] Unhandled exception occurred in async password reset email thread for user_id=%s: %s",
+                user_id,
+                str(err)
+            )
         finally:
             connections.close_all()
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
+    logger.info("[PasswordReset] Background daemon thread spawned for user_id=%s (thread_name=%s)", user_id, thread.name)

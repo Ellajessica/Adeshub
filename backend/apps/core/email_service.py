@@ -134,15 +134,15 @@ def send_transactional_email(
     recipients_log_str = ", ".join(masked_recipients)
 
     # 2. Resolve sender and Reply-To
+    raw_from = getattr(settings, 'EMAIL_FROM', '').strip() or getattr(settings, 'DEFAULT_FROM_EMAIL', '').strip()
     sender = (
         from_email
-        or getattr(settings, 'EMAIL_FROM', '').strip()
-        or getattr(settings, 'DEFAULT_FROM_EMAIL', '').strip()
-        or 'AdesHub <orders@send.adeshubafricanstore.com>'
+        or raw_from.strip('\'"')
+        or 'AdesHub <noreply@adeshubafricanstore.com>'
     )
     reply_to_addr = (
         reply_to
-        or getattr(settings, 'EMAIL_REPLY_TO', '').strip()
+        or getattr(settings, 'EMAIL_REPLY_TO', '').strip().strip('\'"')
         or 'Info@adeshub.co.uk'
     )
 
@@ -176,6 +176,13 @@ def send_transactional_email(
         if reply_to_addr:
             params['reply_to'] = reply_to_addr
 
+        logger.info(
+            "Attempting Resend transactional email delivery: from='%s', to=%s, subject=%r",
+            sender,
+            recipients_log_str,
+            subject,
+        )
+
         attempt = 0
         last_error = None
         while attempt <= max_retries:
@@ -189,7 +196,7 @@ def send_transactional_email(
                     message_id = getattr(response, 'id')
 
                 logger.info(
-                    "Transactional email sent via Resend to %s (message_id=%s, subject=%r)",
+                    "Resend transactional email delivery succeeded for %s: message_id=%s, subject=%r",
                     recipients_log_str,
                     message_id,
                     subject
@@ -204,7 +211,7 @@ def send_transactional_email(
             except Exception as err:
                 last_error = err
                 logger.warning(
-                    "Resend API send attempt %d/%d failed for %s: %s",
+                    "Resend transactional email attempt %d/%d failed for %s: %s",
                     attempt,
                     max_retries + 1,
                     recipients_log_str,
@@ -215,7 +222,8 @@ def send_transactional_email(
 
         # Resend attempts exhausted
         logger.error(
-            "Failed all attempts sending email to %s via Resend: %s",
+            "Resend transactional email delivery failed all %d attempts for %s: %s",
+            max_retries + 1,
             recipients_log_str,
             str(last_error) if last_error else 'Unknown Resend error'
         )

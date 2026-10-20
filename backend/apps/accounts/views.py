@@ -1,8 +1,10 @@
+import logging
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import get_user_model
+from apps.core.email_service import mask_email
 from .serializers import (
     UserSerializer,
     UserRegistrationSerializer,
@@ -14,6 +16,7 @@ from .serializers import (
 )
 from .permissions import IsAdminOrStaff
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
@@ -192,9 +195,18 @@ class PasswordResetRequestView(APIView):
         serializer = PasswordResetRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data['email']
+        masked = mask_email(email)
+
+        logger.info("[PasswordReset] Request received for email: %s", masked)
 
         user = User.objects.filter(email__iexact=email, is_active=True).first()
         if user:
+            logger.info(
+                "[PasswordReset] Account lookup succeeded for email: %s (user_id=%s, is_active=%s). Generating reset token.",
+                masked,
+                user.pk,
+                user.is_active,
+            )
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
             frontend_base = getattr(settings, 'FRONTEND_URL', 'https://adeshubafricanstore.com').rstrip('/')
@@ -202,9 +214,16 @@ class PasswordResetRequestView(APIView):
 
             # In test runner environment, send synchronously so test outbox has the email immediately
             if 'test' in sys.argv:
+                logger.info("[PasswordReset] Test runner detected: delivering reset email synchronously for user_id=%s", user.pk)
                 send_password_reset_email(user, reset_url)
             else:
+                logger.info("[PasswordReset] Dispatching async background email job for user_id=%s", user.pk)
                 send_password_reset_email_async(user.pk, reset_url)
+        else:
+            logger.warning(
+                "[PasswordReset] Account lookup: no active account found matching email: %s. Email dispatch skipped (returning generic success response to prevent enumeration).",
+                masked,
+            )
 
         return Response({
             'message': 'If an account exists with this email address, a password reset link has been sent to your inbox.'

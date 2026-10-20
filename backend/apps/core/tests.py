@@ -58,7 +58,7 @@ class CoreEmailServiceTests(APITestCase):
         from apps.core.email_service import validate_email_configuration
 
         # When RESEND_API_KEY and EMAIL_FROM are configured
-        with override_settings(RESEND_API_KEY="re_test_key_123", EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>", DEBUG=False):
+        with override_settings(RESEND_API_KEY="re_test_key_123", EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>", DEBUG=False):
             is_valid, err = validate_email_configuration()
             self.assertTrue(is_valid)
             self.assertIsNone(err)
@@ -87,7 +87,7 @@ class CoreEmailServiceTests(APITestCase):
 
         with override_settings(
             RESEND_API_KEY="re_mock_test_key",
-            EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
             EMAIL_REPLY_TO="Info@adeshub.co.uk",
         ):
             result = send_transactional_email(
@@ -105,12 +105,36 @@ class CoreEmailServiceTests(APITestCase):
         # Verify SDK parameters passed
         mock_resend_send.assert_called_once()
         call_args = mock_resend_send.call_args[0][0]
-        self.assertEqual(call_args["from"], "AdesHub <orders@send.adeshubafricanstore.com>")
+        self.assertEqual(call_args["from"], "AdesHub <noreply@adeshubafricanstore.com>")
         self.assertEqual(call_args["to"], "customer@example.com")
         self.assertEqual(call_args["subject"], "Your Order Confirmation")
         self.assertEqual(call_args["text"], "Thank you for your order.")
         self.assertEqual(call_args["html"], "<p>Thank you for your order.</p>")
         self.assertEqual(call_args["reply_to"], "Info@adeshub.co.uk")
+
+    @patch("resend.Emails.send")
+    def test_send_transactional_email_default_sender_fallback(self, mock_resend_send):
+        """Test that send_transactional_email defaults to verified noreply@adeshubafricanstore.com if EMAIL_FROM is unset."""
+        from django.test import override_settings
+        from apps.core.email_service import send_transactional_email
+
+        mock_resend_send.return_value = {"id": "msg_resend_test_fallback"}
+
+        with override_settings(
+            RESEND_API_KEY="re_mock_test_key",
+            EMAIL_FROM="",
+            DEFAULT_FROM_EMAIL="",
+        ):
+            result = send_transactional_email(
+                to_email="customer@example.com",
+                subject="Default Sender Test",
+                text_content="Hello fallback",
+            )
+
+        self.assertTrue(result["success"])
+        mock_resend_send.assert_called_once()
+        call_args = mock_resend_send.call_args[0][0]
+        self.assertEqual(call_args["from"], "AdesHub <noreply@adeshubafricanstore.com>")
 
     @patch("resend.Emails.send")
     def test_send_transactional_email_via_resend_failure_and_retry(self, mock_resend_send):
@@ -122,7 +146,7 @@ class CoreEmailServiceTests(APITestCase):
 
         with override_settings(
             RESEND_API_KEY="re_mock_test_key",
-            EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
         ):
             result = send_transactional_email(
                 to_email="customer@example.com",
@@ -150,7 +174,7 @@ class CoreEmailServiceTests(APITestCase):
 
         with override_settings(
             RESEND_API_KEY="re_mock_test_key",
-            EMAIL_FROM="AdesHub <orders@send.adeshubafricanstore.com>",
+            EMAIL_FROM="AdesHub <noreply@adeshubafricanstore.com>",
             DEBUG=False,
         ):
             result = send_transactional_email(

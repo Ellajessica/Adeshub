@@ -186,9 +186,9 @@ Add the following variables to your `.env` file:
 RESEND_API_KEY=re_your_api_key_here
 
 # 2. Sender Identity (Must match a verified domain in Resend)
-#    - Production (after DNS verification of subdomain): AdesHub <orders@send.adeshubafricanstore.com>
+#    - Production (verified custom apex domain): AdesHub <noreply@adeshubafricanstore.com>
 #    - Sandbox Testing (prior to DNS verification): AdesHub <onboarding@resend.dev>
-EMAIL_FROM=AdesHub <orders@send.adeshubafricanstore.com>
+EMAIL_FROM=AdesHub <noreply@adeshubafricanstore.com>
 
 # 3. Reply-To and Support (Client's business email hosted on Zoho Mail)
 EMAIL_REPLY_TO=Info@adeshub.co.uk
@@ -203,22 +203,18 @@ FRONTEND_URL=https://adeshubafricanstore.com
 
 ---
 
-### Outstanding DNS & Resend Domain Verification Steps
+### Resend Domain Verification & Sending Identity
 
-To send transactional emails to customers from `orders@send.adeshubafricanstore.com`:
+To send transactional emails to customers from `noreply@adeshubafricanstore.com`:
 
 1. **Log in to Resend Dashboard**: Navigate to [https://resend.com/domains](https://resend.com/domains).
-2. **Add Domain**: Click **Add Domain** and enter the dedicated sending subdomain: `send.adeshubafricanstore.com`.
-3. **Configure DNS Records** in your DNS provider (e.g., Namecheap, Cloudflare, GoDaddy):
-   - **DKIM (TXT record)**: Provided by Resend (e.g. `resend._domainkey.send.adeshubafricanstore.com`).
-   - **SPF (MX or TXT record)**: Provided by Resend for `send.adeshubafricanstore.com`.
-   - **DMARC (TXT record)**: Recommended TXT `_dmarc.send.adeshubafricanstore.com` with `v=DMARC1; p=none;`.
-   > **Important:** Do **not** modify or delete existing MX records for `adeshub.co.uk` (Zoho Mail). The client's Zoho mailbox for `Info@adeshub.co.uk` handles inbound customer replies and operates completely independently.
-4. **Verify Domain**: Click **Verify DNS Records** in the Resend dashboard until status shows **Verified**.
-5. **Update Environment**: Change `EMAIL_FROM` in production `.env` to:
-   ```env
-   EMAIL_FROM=AdesHub <orders@send.adeshubafricanstore.com>
-   ```
+2. **Verify Domain**: Ensure the custom domain `adeshubafricanstore.com` displays status **Verified**.
+3. **Configure Environment in Render**:
+   In your Render Dashboard -> Backend Web Service -> **Environment**:
+   - `RESEND_API_KEY`: Your Resend API key (`re_...`).
+   - `EMAIL_FROM`: `AdesHub <noreply@adeshubafricanstore.com>`.
+   - `EMAIL_REPLY_TO`: `Info@adeshub.co.uk` (customer replies route to your Zoho mailbox).
+   - `FRONTEND_URL`: `https://adeshubafricanstore.com`.
 
 ---
 
