@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { CartProvider } from './context/CartContext';
 import { AuthProvider } from './context/AuthContext';
 import { Layout } from './components/layout/Layout';
@@ -29,12 +29,16 @@ export const App: React.FC = () => {
       <AuthProvider>
         <CartProvider>
           <Routes>
+            {/* Fallback for legacy cached /index.html browser requests */}
+            <Route path="index.html" element={<Navigate to="/" replace />} />
+
             {/* Custom Business Administration Dashboard Routes */}
             <Route path="admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboardPage />} />
               <Route path="orders" element={<AdminOrdersPage />} />
               <Route path="products" element={<AdminProductsPage />} />
               <Route path="categories" element={<AdminCategoriesPage />} />
+              <Route path="*" element={<Navigate to="/admin" replace />} />
             </Route>
 
             {/* Client-Facing Storefront Routes */}
