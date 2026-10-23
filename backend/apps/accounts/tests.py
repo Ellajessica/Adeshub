@@ -669,3 +669,174 @@ class PasswordResetAPITests(APITestCase):
         # Ensure error details and tokens are not leaked
         self.assertNotIn("rate limit", str(response.data))
         self.assertNotIn("token", str(response.data))
+
+
+class CreateAdminFromEnvCommandTests(TestCase):
+    """
+    Automated tests for create_admin_from_env management command.
+    Verifies secure superuser provisioning, idempotency, and secrecy.
+    """
+
+    def test_create_admin_from_env_success(self):
+        """Test creating a superuser when environment variables are supplied."""
+        import os
+        from io import StringIO
+        from unittest.mock import patch
+        from django.core.management import call_command
+
+        test_email = 'new.production.admin@adeshubafricanstore.com'
+        test_pass = 'SuperSecureP@ssword2026!'
+        out = StringIO()
+
+        env_vars = {
+            'DJANGO_SUPERUSER_EMAIL': test_email,
+            'DJANGO_SUPERUSER_PASSWORD': test_pass,
+            'DJANGO_SUPERUSER_FIRST_NAME': 'AdesHub',
+            'DJANGO_SUPERUSER_LAST_NAME': 'Owner',
+        }
+
+        with patch.dict(os.environ, env_vars, clear=False):
+            call_command('create_admin_from_env', stdout=out)
+
+        output = out.getvalue()
+        self.assertIn("Superuser account successfully created", output)
+        self.assertIn(test_email, output)
+        # Verify password is never logged or printed
+        self.assertNotIn(test_pass, output)
+
+        # Verify user state in database
+        created_user = User.objects.filter(email=test_email).first()
+        self.assertIsNotNone(created_user)
+        self.assertTrue(created_user.is_staff)
+        self.assertTrue(created_user.is_superuser)
+        self.assertTrue(created_user.is_active)
+        self.assertEqual(created_user.user_type, User.UserType.ADMIN)
+        self.assertTrue(created_user.check_password(test_pass))
+        self.assertEqual(created_user.first_name, 'AdesHub')
+        self.assertEqual(created_user.last_name, 'Owner')
+
+    def test_create_admin_from_env_idempotent_skip_when_user_exists(self):
+        """Test command skips creation if account with that email already exists and never overwrites password."""
+        import os
+        from io import StringIO
+        from unittest.mock import patch
+        from django.core.management import call_command
+
+        existing_email = 'existing.admin@adeshubafricanstore.com'
+        original_pass = 'OriginalP@ssword123!'
+        different_pass = 'AttemptedNewPassword456!'
+
+        # Create existing user
+        User.objects.create_superuser(
+            email=existing_email,
+            password=original_pass,
+            first_name='Original',
+            last_name='Admin'
+        )
+
+        out = StringIO()
+        env_vars = {
+            'DJANGO_SUPERUSER_EMAIL': existing_email,
+            'DJANGO_SUPERUSER_PASSWORD': different_pass,
+        }
+
+        with patch.dict(os.environ, env_vars, clear=False):
+            call_command('create_admin_from_env', stdout=out)
+
+        output = out.getvalue()
+        self.assertIn("already exists", output)
+        self.assertIn("Skipping creation", output)
+        # Ensure password is not printed
+        self.assertNotIn(different_pass, output)
+        self.assertNotIn(original_pass, output)
+
+        # Verify user password remains unchanged
+        user = User.objects.get(email=existing_email)
+        self.assertTrue(user.check_password(original_pass))
+        self.assertFalse(user.check_password(different_pass))
+
+    def test_create_admin_from_env_missing_variables_skips_cleanly(self):
+        """Test command skips cleanly with code 0 when environment variables are not set."""
+        import os
+        from io import StringIO
+        from unittest.mock import patch
+        from django.core.management import call_command
+
+        out = StringIO()
+        env_vars = {
+            'DJANGO_SUPERUSER_EMAIL': '',
+            'DJANGO_SUPERUSER_PASSWORD': '',
+            'ADMIN_EMAIL': '',
+            'ADMIN_PASSWORD': '',
+        }
+
+        with patch.dict(os.environ, env_vars, clear=False):
+            call_command('create_admin_from_env', stdout=out)
+
+        output = out.getvalue()
+        self.assertIn("not configured. Skipping superuser provisioning", output)
+
+    def test_create_admin_from_env_username_alias(self):
+        """Test command supports DJANGO_SUPERUSER_USERNAME as an email alias."""
+        import os
+        from io import StringIO
+        from unittest.mock import patch
+        from django.core.management import call_command
+
+        test_email = 'username.alias@adeshubafricanstore.com'
+        test_pass = 'StrongPassword2026!'
+        out = StringIO()
+
+        env_vars = {
+            'DJANGO_SUPERUSER_USERNAME': test_email,
+            'DJANGO_SUPERUSER_PASSWORD': test_pass,
+        }
+
+        with patch.dict(os.environ, env_vars, clear=False):
+            call_command('create_admin_from_env', stdout=out)
+
+        user = User.objects.filter(email=test_email).first()
+        self.assertIsNotNone(user)
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.check_password(test_pass))
+
+    def test_create_admin_from_env_invalid_email_rejected(self):
+        """Test command rejects username without @ symbol."""
+        import os
+        from io import StringIO
+        from unittest.mock import patch
+        from django.core.management import call_command
+
+        out = StringIO()
+        err = StringIO()
+        env_vars = {
+            'DJANGO_SUPERUSER_EMAIL': 'not-an-email',
+            'DJANGO_SUPERUSER_PASSWORD': 'ValidPassword2026!',
+        }
+
+        with patch.dict(os.environ, env_vars, clear=False):
+            call_command('create_admin_from_env', stdout=out, stderr=err)
+
+        self.assertIn("not a valid email address", err.getvalue())
+        self.assertEqual(User.objects.filter(email='not-an-email').count(), 0)
+
+    def test_create_admin_from_env_short_password_rejected(self):
+        """Test command rejects password shorter than 8 characters."""
+        import os
+        from io import StringIO
+        from unittest.mock import patch
+        from django.core.management import call_command
+
+        out = StringIO()
+        err = StringIO()
+        env_vars = {
+            'DJANGO_SUPERUSER_EMAIL': 'short.pass@adeshub.com',
+            'DJANGO_SUPERUSER_PASSWORD': 'short',
+        }
+
+        with patch.dict(os.environ, env_vars, clear=False):
+            call_command('create_admin_from_env', stdout=out, stderr=err)
+
+        self.assertIn("must be at least 8 characters", err.getvalue())
+        self.assertEqual(User.objects.filter(email='short.pass@adeshub.com').count(), 0)
+
