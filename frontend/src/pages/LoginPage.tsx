@@ -18,7 +18,8 @@ export const LoginPage: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const from = (location.state as { from?: string })?.from || '/account';
+  const queryRedirect = new URLSearchParams(location.search).get('redirect');
+  const from = (location.state as { from?: string })?.from || queryRedirect || '/account';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

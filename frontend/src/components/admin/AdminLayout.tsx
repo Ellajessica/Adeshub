@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getUserDisplayName, getUserAvatarInitial } from '../../utils/userDisplay';
 import {
@@ -34,10 +34,15 @@ export const AdminLayout: React.FC = () => {
     );
   }
 
-  // 2. Unauthenticated check
+  // 2. Unauthenticated check - safe declarative redirect
   if (!isAuthenticated) {
-    navigate(`/login?redirect=${encodeURIComponent(location.pathname)}`, { replace: true });
-    return null;
+    return (
+      <Navigate
+        to={`/login?redirect=${encodeURIComponent(location.pathname)}`}
+        state={{ from: location.pathname }}
+        replace
+      />
+    );
   }
 
   // 3. Staff / Administrator authorization gate (enforced on both React & Django backend)
