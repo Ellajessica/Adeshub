@@ -336,6 +336,190 @@ class StripePaymentIntegrationTestCase(APITestCase):
         self.assertEqual(res.data["payment_status"], Order.PaymentStatus.PENDING)
         self.assertFalse(res.data["is_paid"])
 
+    @patch("apps.orders.views.stripe.checkout.Session.retrieve")
+    def test_payment_status_reconciles_paid_stripe_session_object(self, mock_retrieve):
+        session_id = "cs_test_paid_obj_123"
+        self.order.stripe_checkout_session_id = session_id
+        self.order.payment_status = Order.PaymentStatus.PENDING
+        self.order.order_status = Order.OrderStatus.PENDING
+        self.order.save()
+
+        # Construct a real Stripe Checkout Session object from Stripe SDK (not a plain dict)
+        stripe_session = stripe.checkout.Session.construct_from({
+            "id": session_id,
+            "payment_status": "paid",
+            "currency": "gbp",
+            "amount_total": 2399,
+            "client_reference_id": self.order.order_reference,
+            "payment_intent": "pi_test_paid_456",
+            "customer_details": {"email": "paid_customer@example.com"},
+            "metadata": {"order_reference": self.order.order_reference},
+        }, stripe.api_key)
+
+        mock_retrieve.return_value = stripe_session
+
+        with override_settings(STRIPE_SECRET_KEY="sk_test_mock_secret", STRIPE_CURRENCY="gbp"):
+            res = self.client.get(
+                f"/api/orders/{self.order.order_reference}/payment-status/?session_id={session_id}"
+            )
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["payment_status"], Order.PaymentStatus.PAID)
+        self.assertTrue(res.data["is_paid"])
+        self.assertEqual(res.data["stripe_payment_intent_id"], "pi_test_paid_456")
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PAID)
+        self.assertEqual(self.order.order_status, Order.OrderStatus.CONFIRMED)
+        self.assertEqual(self.order.stripe_payment_intent_id, "pi_test_paid_456")
+
+    @patch("apps.orders.views.stripe.checkout.Session.retrieve")
+    def test_payment_status_unpaid_or_incomplete_session_does_not_mark_paid(self, mock_retrieve):
+        session_id = "cs_test_unpaid_obj_123"
+        self.order.stripe_checkout_session_id = session_id
+        self.order.payment_status = Order.PaymentStatus.PENDING
+        self.order.save()
+
+        for unpaid_status in ["unpaid", "incomplete", "no_payment_required"]:
+            stripe_session = stripe.checkout.Session.construct_from({
+                "id": session_id,
+                "payment_status": unpaid_status,
+                "currency": "gbp",
+                "amount_total": 2399,
+                "client_reference_id": self.order.order_reference,
+                "metadata": {"order_reference": self.order.order_reference},
+            }, stripe.api_key)
+
+            mock_retrieve.return_value = stripe_session
+
+            with override_settings(STRIPE_SECRET_KEY="sk_test_mock_secret"):
+                res = self.client.get(
+                    f"/api/orders/{self.order.order_reference}/payment-status/?session_id={session_id}"
+                )
+
+            self.assertEqual(res.status_code, status.HTTP_200_OK)
+            self.assertEqual(res.data["payment_status"], Order.PaymentStatus.PENDING)
+            self.assertFalse(res.data["is_paid"])
+
+            self.order.refresh_from_db()
+            self.assertEqual(self.order.payment_status, Order.PaymentStatus.PENDING)
+
+    @patch("apps.orders.views.stripe.checkout.Session.retrieve")
+    def test_payment_status_reconciliation_exception_handled_gracefully(self, mock_retrieve):
+        session_id = "cs_test_err_obj_123"
+        self.order.stripe_checkout_session_id = session_id
+        self.order.payment_status = Order.PaymentStatus.PENDING
+        self.order.save()
+
+        mock_retrieve.side_effect = stripe.error.APIConnectionError("Stripe API connection failed")
+
+        with override_settings(STRIPE_SECRET_KEY="sk_test_mock_secret"):
+            res = self.client.get(
+                f"/api/orders/{self.order.order_reference}/payment-status/?session_id={session_id}"
+            )
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["payment_status"], Order.PaymentStatus.PENDING)
+        self.assertFalse(res.data["is_paid"])
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PENDING)
+
+    @patch("apps.orders.views.stripe.checkout.Session.retrieve")
+    def test_payment_status_order_reference_mismatch_does_not_mark_paid(self, mock_retrieve):
+        session_id = "cs_test_mismatch_obj_123"
+        self.order.stripe_checkout_session_id = session_id
+        self.order.payment_status = Order.PaymentStatus.PENDING
+        self.order.save()
+
+        stripe_session = stripe.checkout.Session.construct_from({
+            "id": session_id,
+            "payment_status": "paid",
+            "currency": "gbp",
+            "amount_total": 2399,
+            "client_reference_id": "ADH-SOME-OTHER-ORDER",
+            "metadata": {"order_reference": "ADH-SOME-OTHER-ORDER"},
+        }, stripe.api_key)
+
+        mock_retrieve.return_value = stripe_session
+
+        with override_settings(STRIPE_SECRET_KEY="sk_test_mock_secret"):
+            res = self.client.get(
+                f"/api/orders/{self.order.order_reference}/payment-status/?session_id={session_id}"
+            )
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["payment_status"], Order.PaymentStatus.PENDING)
+        self.assertFalse(res.data["is_paid"])
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PENDING)
+
+    @patch("apps.orders.views.stripe.checkout.Session.retrieve")
+    def test_payment_status_session_id_mismatch_does_not_reconcile(self, mock_retrieve):
+        self.order.stripe_checkout_session_id = "cs_test_valid_123"
+        self.order.payment_status = Order.PaymentStatus.PENDING
+        self.order.save()
+
+        self.client.force_authenticate(user=self.user)
+        with override_settings(STRIPE_SECRET_KEY="sk_test_mock_secret"):
+            res = self.client.get(
+                f"/api/orders/{self.order.order_reference}/payment-status/?session_id=cs_test_tampered_999"
+            )
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["payment_status"], Order.PaymentStatus.PENDING)
+        self.assertFalse(res.data["is_paid"])
+        mock_retrieve.assert_not_called()
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PENDING)
+
+    @patch("apps.orders.views.stripe.checkout.Session.retrieve")
+    def test_payment_status_financial_mismatch_does_not_mark_paid(self, mock_retrieve):
+        session_id = "cs_test_fin_123"
+        self.order.stripe_checkout_session_id = session_id
+        self.order.payment_status = Order.PaymentStatus.PENDING
+        self.order.save()
+
+        # Currency mismatch
+        stripe_session = stripe.checkout.Session.construct_from({
+            "id": session_id,
+            "payment_status": "paid",
+            "currency": "usd",
+            "amount_total": 2399,
+            "client_reference_id": self.order.order_reference,
+            "metadata": {"order_reference": self.order.order_reference},
+        }, stripe.api_key)
+        mock_retrieve.return_value = stripe_session
+
+        with override_settings(STRIPE_SECRET_KEY="sk_test_mock_secret", STRIPE_CURRENCY="gbp"):
+            res = self.client.get(
+                f"/api/orders/{self.order.order_reference}/payment-status/?session_id={session_id}"
+            )
+        self.assertEqual(res.data["payment_status"], Order.PaymentStatus.PENDING)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PENDING)
+
+        # Amount mismatch
+        stripe_session = stripe.checkout.Session.construct_from({
+            "id": session_id,
+            "payment_status": "paid",
+            "currency": "gbp",
+            "amount_total": 100,  # Expected 2399
+            "client_reference_id": self.order.order_reference,
+            "metadata": {"order_reference": self.order.order_reference},
+        }, stripe.api_key)
+        mock_retrieve.return_value = stripe_session
+
+        with override_settings(STRIPE_SECRET_KEY="sk_test_mock_secret", STRIPE_CURRENCY="gbp"):
+            res = self.client.get(
+                f"/api/orders/{self.order.order_reference}/payment-status/?session_id={session_id}"
+            )
+        self.assertEqual(res.data["payment_status"], Order.PaymentStatus.PENDING)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.payment_status, Order.PaymentStatus.PENDING)
+
     def test_webhook_missing_signature(self):
         res = self.client.post("/api/orders/webhook/", data=b"{}", content_type="application/json")
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)

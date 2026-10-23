@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 from decimal import Decimal
 from django.conf import settings
@@ -23,7 +24,10 @@ from .stripe_service import (
     is_stripe_configured,
     create_stripe_checkout_session,
     verify_and_process_webhook,
+    get_stripe_secret_key,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class OrderCreateView(APIView):
@@ -401,40 +405,108 @@ class OrderPaymentStatusView(APIView):
             session_id
         ):
             try:
-                import stripe
-                from .stripe_service import get_stripe_secret_key
                 secret_key = get_stripe_secret_key()
                 if secret_key:
                     stripe_session = stripe.checkout.Session.retrieve(session_id, api_key=secret_key)
-                    if stripe_session and stripe_session.get('payment_status') == 'paid':
-                        expected_currency = getattr(settings, 'STRIPE_CURRENCY', 'gbp').lower()
-                        session_currency = (stripe_session.get('currency') or '').lower()
-                        amount_total = stripe_session.get('amount_total')
-                        expected_pence = round(order.total_amount * 100)
-
-                        if session_currency == expected_currency and amount_total == expected_pence:
-                            order.payment_status = Order.PaymentStatus.PAID
-                            if stripe_session.get('payment_intent'):
-                                order.stripe_payment_intent_id = str(stripe_session.get('payment_intent'))
-                            cust_email = stripe_session.get('customer_details', {}).get('email') or stripe_session.get('customer_email')
-                            if cust_email and not order.user and not order.guest_email:
-                                order.guest_email = cust_email.strip().lower()
-                            if order.order_status == Order.OrderStatus.PENDING:
-                                order.order_status = Order.OrderStatus.CONFIRMED
-
-                            order.save(update_fields=[
-                                'payment_status', 'stripe_payment_intent_id',
-                                'order_status', 'guest_email', 'updated_at'
-                            ])
-
-                            # Trigger confirmation email asynchronously
+                    if stripe_session:
+                        # Stripe Python SDK Session is a StripeObject, not a dict.
+                        # Convert to dict if supported, otherwise support dict or attribute access.
+                        if hasattr(stripe_session, 'to_dict') and callable(getattr(stripe_session, 'to_dict', None)):
                             try:
-                                from .email_service import send_order_confirmation_email_async
-                                send_order_confirmation_email_async(order.id)
-                            except Exception as email_err:
-                                logger.error("Failed to trigger confirmation email for order %s: %s", order.order_reference, email_err)
+                                session_data = stripe_session.to_dict()
+                            except Exception:
+                                session_data = None
+                        elif isinstance(stripe_session, dict):
+                            session_data = stripe_session
+                        else:
+                            session_data = None
+
+                        def _get_val(key: str, default: Any = None) -> Any:
+                            if session_data is not None and isinstance(session_data, dict):
+                                return session_data.get(key, default)
+                            return getattr(stripe_session, key, default)
+
+                        # Validate session ID association
+                        session_obj_id = _get_val('id')
+                        if session_obj_id and session_obj_id != session_id:
+                            logger.warning(
+                                "Stripe session ID mismatch for order %s: expected %s, got %s",
+                                order.order_reference, session_id, session_obj_id
+                            )
+                            stripe_session = None
+
+                    if stripe_session:
+                        # Verify session-to-order association via client_reference_id or metadata
+                        session_order_ref = _get_val('client_reference_id')
+                        if not session_order_ref:
+                            metadata = _get_val('metadata') or {}
+                            if isinstance(metadata, dict):
+                                session_order_ref = metadata.get('order_reference')
+                            else:
+                                session_order_ref = getattr(metadata, 'order_reference', None)
+
+                        if session_order_ref and session_order_ref != order.order_reference:
+                            logger.warning(
+                                "Stripe session %s order reference mismatch: expected %s, got %s",
+                                session_id, order.order_reference, session_order_ref
+                            )
+                        else:
+                            payment_status = _get_val('payment_status')
+                            if payment_status == 'paid':
+                                expected_currency = getattr(settings, 'STRIPE_CURRENCY', 'gbp').lower()
+                                session_currency = (_get_val('currency') or '').lower()
+                                amount_total = _get_val('amount_total')
+                                expected_pence = round(order.total_amount * 100)
+
+                                if session_currency == expected_currency and amount_total == expected_pence:
+                                    order.payment_status = Order.PaymentStatus.PAID
+                                    payment_intent_val = _get_val('payment_intent')
+                                    if payment_intent_val:
+                                        order.stripe_payment_intent_id = str(payment_intent_val)
+
+                                    cust_details = _get_val('customer_details') or {}
+                                    if isinstance(cust_details, dict):
+                                        cust_email = cust_details.get('email')
+                                    else:
+                                        cust_email = getattr(cust_details, 'email', None)
+                                    if not cust_email:
+                                        cust_email = _get_val('customer_email')
+
+                                    if cust_email and not order.user and not order.guest_email:
+                                        order.guest_email = str(cust_email).strip().lower()
+
+                                    if order.order_status == Order.OrderStatus.PENDING:
+                                        order.order_status = Order.OrderStatus.CONFIRMED
+
+                                    order.save(update_fields=[
+                                        'payment_status', 'stripe_payment_intent_id',
+                                        'order_status', 'guest_email', 'updated_at'
+                                    ])
+
+                                    # Trigger confirmation email asynchronously
+                                    try:
+                                        from .email_service import send_order_confirmation_email_async
+                                        send_order_confirmation_email_async(order.id)
+                                    except Exception as email_err:
+                                        try:
+                                            logger.error("Failed to trigger confirmation email for order %s: %s", order.order_reference, email_err)
+                                        except Exception:
+                                            pass
+                                else:
+                                    logger.warning(
+                                        "Stripe session %s reconciliation financial mismatch for order %s: currency (expected %s, got %s), amount (expected %s, got %s)",
+                                        session_id, order.order_reference, expected_currency, session_currency, expected_pence, amount_total
+                                    )
+                            else:
+                                logger.info(
+                                    "Stripe session %s for order %s is not paid (status: %s)",
+                                    session_id, order.order_reference, payment_status
+                                )
             except Exception as reconcile_err:
-                logger.warning("Could not reconcile Stripe session %s for order %s: %s", session_id, order.order_reference, reconcile_err)
+                try:
+                    logger.warning("Could not reconcile Stripe session %s for order %s: %s", session_id, order.order_reference, reconcile_err)
+                except Exception:
+                    pass
 
         customer_email = (order.user.email if order.user else (order.guest_email or '')) if is_authorized_for_pii else ''
 
