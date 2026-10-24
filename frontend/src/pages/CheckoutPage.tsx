@@ -15,7 +15,8 @@ import {
   ShieldCheck,
   CreditCard,
   User as UserIcon,
-  Info
+  Info,
+  Lock
 } from 'lucide-react';
 import './CheckoutPage.css';
 
@@ -134,6 +135,10 @@ export const CheckoutPage: React.FC = () => {
       </div>
     );
   }
+
+  const currentSubtotal = cart.subtotal;
+  const finalTotalAmount = deliveryQuote ? deliveryQuote.final_total : currentSubtotal;
+  const formattedFinalTotal = `£${parseFloat(String(finalTotalAmount || 0)).toFixed(2)}`;
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -577,49 +582,47 @@ export const CheckoutPage: React.FC = () => {
               )}
             </section>
 
-            {/* Step 3: Payment Notice */}
+            {/* Step 3: Payment Method */}
             <section className="checkout-section">
               <div className="section-header">
                 <CreditCard className="section-icon" size={20} />
                 <h2>3. Payment Method</h2>
               </div>
 
-              <div className="payment-notice-card" style={{ borderColor: stripeConfig?.is_configured ? '#86efac' : '#bfdbfe', backgroundColor: stripeConfig?.is_configured ? '#f0fdf4' : '#eff6ff' }}>
-                <div className="notice-header">
-                  {stripeConfig?.is_configured ? (
-                    <>
-                      <ShieldCheck size={20} style={{ color: '#16a34a' }} />
-                      <h4 style={{ color: '#166534' }}>Stripe Checkout (One-Time Card Payment in GBP £)</h4>
-                    </>
-                  ) : (
-                    <>
-                      <Info size={20} className="info-icon" />
-                      <h4>Payment Gateway: Stripe Test Mode / Configuration Pending</h4>
-                    </>
-                  )}
+              <div className="payment-method-card">
+                <div className="payment-method-row">
+                  <div className="payment-method-info">
+                    <div className="payment-method-radio-indicator" aria-hidden="true">
+                      <span className="radio-dot"></span>
+                    </div>
+                    <div className="payment-method-label-group">
+                      <span className="payment-method-name">Secure card payment</span>
+                      <span className="payment-method-subtext">Credit or Debit card processed securely via Stripe</span>
+                    </div>
+                  </div>
+                  <div className="payment-card-badges" aria-hidden="true">
+                    <span className="card-badge visa-badge">VISA</span>
+                    <span className="card-badge mc-badge">MC</span>
+                    <span className="card-badge amex-badge">AMEX</span>
+                  </div>
                 </div>
-                {stripeConfig?.is_configured ? (
-                  <p style={{ color: '#14532d' }}>
-                    Upon confirming your order, you will be redirected to the secure Stripe Checkout portal to complete payment by Credit / Debit Card in GBP (£).
-                  </p>
-                ) : (
-                  <p>
-                    Stripe payment gateway credentials are being configured in the environment. Confirming this order will atomically reserve your stock and generate your official Order Reference with an <strong>Awaiting Payment (PENDING)</strong> status.
-                  </p>
-                )}
-                <p className="notice-subtext">
-                  All monetary calculations and currency rules are authoritatively enforced by the backend database.
-                </p>
+                <div className="payment-security-footer">
+                  <ShieldCheck size={14} className="security-icon" />
+                  <span>Encrypted 256-bit SSL transaction</span>
+                </div>
               </div>
 
               <div className="form-group margin-top">
                 <label htmlFor="notes">Order Delivery Notes (Optional)</label>
-                <textarea
-                  id="notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                />
+                <div className="input-wrapper">
+                  <textarea
+                    id="notes"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="e.g. Leave with neighbour at #12, buzzer code, safe place instructions..."
+                    rows={3}
+                  />
+                </div>
               </div>
             </section>
           </div>
@@ -665,35 +668,39 @@ export const CheckoutPage: React.FC = () => {
                 </div>
 
                 {deliveryQuote?.amount_needed_for_free_delivery && parseFloat(deliveryQuote.amount_needed_for_free_delivery) > 0 && (
-                  <div className="free-delivery-hint" style={{ fontSize: '0.8rem', color: '#0369a1', background: '#f0f9ff', border: '1px solid #bae6fd', padding: '6px 10px', borderRadius: '6px', margin: '6px 0' }}>
-                    <Info size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-                    Add £{parseFloat(deliveryQuote.amount_needed_for_free_delivery).toFixed(2)} more for <strong>Free Delivery</strong>!
+                  <div className="free-delivery-progress-hint">
+                    <Info size={14} className="hint-icon" />
+                    <span>Add £{parseFloat(deliveryQuote.amount_needed_for_free_delivery).toFixed(2)} more for <strong>Free Delivery</strong></span>
                   </div>
                 )}
 
                 <div className="calc-row total-row">
-                  <span>Final Total</span>
+                  <span className="total-label">Final Total</span>
                   <PriceDisplay
-                    amount={deliveryQuote ? deliveryQuote.final_total : cart.subtotal}
+                    amount={finalTotalAmount}
                     className="final-price"
                   />
                 </div>
               </div>
 
-              <div className="guarantee-box">
-                <ShieldCheck size={18} />
-                <span>Authoritative DB Price Check & Atomic Stock Reservation</span>
-              </div>
-
-              <button type="submit" className="place-order-btn" disabled={isSubmitting}>
-                {isSubmitting ? (
+              <button
+                type="submit"
+                className="place-order-btn"
+                disabled={isSubmitting || isRedirectingToPayment}
+              >
+                {isSubmitting || isRedirectingToPayment ? (
                   <span className="spinner-inline">Processing Order...</span>
                 ) : stripeConfig?.is_configured ? (
-                  <span>Place Order & Pay with Card (£)</span>
+                  <span>Place Order & Pay {formattedFinalTotal}</span>
                 ) : (
-                  <span>Confirm Order & Reserve Stock</span>
+                  <span>Confirm Order • {formattedFinalTotal}</span>
                 )}
               </button>
+
+              <div className="checkout-trust-guarantee">
+                <Lock size={13} className="trust-lock-icon" />
+                <span>Guaranteed safe and secure checkout</span>
+              </div>
             </div>
           </div>
         </form>

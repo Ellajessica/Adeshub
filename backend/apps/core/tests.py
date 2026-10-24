@@ -67,6 +67,8 @@ class CoreEmailServiceTests(APITestCase):
         with override_settings(RESEND_API_KEY="re_test_key_123", EMAIL_FROM="", DEFAULT_FROM_EMAIL="", DEBUG=False):
             is_valid, err = validate_email_configuration()
             self.assertFalse(is_valid)
+            self.assertIsNotNone(err)
+            assert err is not None
             self.assertIn("EMAIL_FROM", err)
 
     def test_send_transactional_email_empty_recipient(self):

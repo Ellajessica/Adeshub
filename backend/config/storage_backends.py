@@ -5,16 +5,21 @@ Provides S3-compatible media file storage using Cloudflare R2 via django-storage
 """
 
 import os
+from typing import TYPE_CHECKING
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 
-try:
-    from storages.backends.s3boto3 import S3Boto3Storage
+if TYPE_CHECKING:
+    from storages.backends.s3boto3 import S3Boto3Storage as _BaseStorage
     HAS_S3_STORAGE = True
-    _BaseStorage = S3Boto3Storage
-except ImportError:
-    HAS_S3_STORAGE = False
-    _BaseStorage = FileSystemStorage
+else:
+    try:
+        from storages.backends.s3boto3 import S3Boto3Storage
+        HAS_S3_STORAGE = True
+        _BaseStorage = S3Boto3Storage
+    except ImportError:
+        HAS_S3_STORAGE = False
+        _BaseStorage = FileSystemStorage
 
 
 class CloudflareR2MediaStorage(_BaseStorage):
@@ -72,7 +77,7 @@ class CloudflareR2MediaStorage(_BaseStorage):
             return explicit.lower() in ('true', '1', 'yes')
         return not bool(self.custom_domain)
 
-    def url(self, name):
+    def url(self, name, parameters=None, expire=None, http_method=None):
         """
         Return the public URL for the file.
         Ensures consistent https:// URLs.
@@ -82,7 +87,7 @@ class CloudflareR2MediaStorage(_BaseStorage):
             media_url = getattr(settings, 'MEDIA_URL', '/media/')
             return f"{media_url.rstrip('/')}/{name.lstrip('/')}"
 
-        url = super().url(name)
+        url = super().url(name, parameters=parameters, expire=expire, http_method=http_method)
         # Ensure scheme is present if django-storages produces a protocol-relative '//' URL
         if url.startswith('//'):
             url = f"https:{url}"

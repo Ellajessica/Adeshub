@@ -1,6 +1,7 @@
 import logging
 import sys
 import threading
+from typing import Any
 from django.conf import settings
 from apps.accounts.models import User
 from apps.core.email_service import send_transactional_email, mask_email
@@ -13,7 +14,7 @@ def _mask_email(email: str) -> str:
     return mask_email(email)
 
 
-def build_password_reset_email_content(user: User, reset_url: str) -> tuple[str, str, str]:
+def build_password_reset_email_content(user: Any, reset_url: str) -> tuple[str, str, str]:
     """
     Construct subject, plain text body, and responsive HTML body
     for a password reset email matching AdesHub brand identity.
@@ -134,7 +135,7 @@ The AdesHub Team
     return subject, text_content, html_content
 
 
-def send_password_reset_email(user: User, reset_url: str, max_retries: int = 1) -> bool:
+def send_password_reset_email(user: Any, reset_url: str, max_retries: int = 1) -> bool:
     """
     Deliver the password reset email to the user using configured transactional email service.
     Tokens are never logged.

@@ -121,6 +121,25 @@ export const Header: React.FC = () => {
     navigate('/');
   };
 
+  const isCheckoutPage = location.pathname === '/checkout';
+
+  if (isCheckoutPage) {
+    return (
+      <header className="site-header site-header--checkout">
+        <div className="container site-header__checkout-inner">
+          <Link to="/" className="site-header__logo" aria-label="AdesHub Home">
+            <span className="logo-accent">Ades<span className="logo-hub">Hub</span></span>
+            <span className="logo-badge">AFRICAN MARKET</span>
+          </Link>
+          <div className="checkout-trust-badge">
+            <ShieldCheck size={18} className="trust-badge-icon" />
+            <span className="trust-badge-text">Secure Checkout</span>
+          </div>
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="site-header">
       {/* 1. PRIMARY TOP ROW: LOGO | HORIZONTALLY PROMINENT SEARCH | ACCOUNT & CART */}
